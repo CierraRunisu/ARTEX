@@ -374,7 +374,7 @@ func TestDetachedIntentPinnedOwnerUsesPinnedResolver(t *testing.T) {
 		t.Fatalf("pause intent: changed=%v err=%v", changed, err)
 	}
 	e := NewEngine(m)
-	e.slotPlans.Store(task.ID, map[string]int64{"work#4": 12})
+	e.slotPlans.Store(task.ID, map[string]WorkerSlot{"work#4": {Name: "work#4", ProfileID: 12}})
 	var pinnedCalls, snapshotCalls atomic.Int32
 	e.SetWorkerResolver(func(_ *Task, slot WorkerSlot) (*agent.Worker, error) {
 		pinnedCalls.Add(1)

@@ -66,7 +66,8 @@ type Task struct {
 	ShareGlobalAssets bool `json:"share_global_assets"`
 	// WorkerCount is the per-task concurrent work-agent count. 0 means use the
 	// global settings.workers default when the engine starts this task.
-	WorkerCount int `json:"worker_count"`
+	WorkerCount         int     `json:"worker_count"`
+	WorkerLLMProfileIDs []int64 `json:"worker_llm_profile_ids"`
 }
 
 // TaskDeleteResult reports optional related-data cleanup performed in the same
@@ -204,7 +205,8 @@ type TaskCreateOptions struct {
 	// ShareGlobalAssets allows reading unrelated global assets. The default is false.
 	ShareGlobalAssets bool
 	// WorkerCount 是本任务并发运行的工作 Agent 数;0/省略=用全局默认。上限 50。
-	WorkerCount int
+	WorkerCount         int
+	WorkerLLMProfileIDs []int64
 	// Remark 是创建时可带的任务备注(最多 2000 字);空=无备注。
 	Remark string
 	// InterceptRules 是任务级资产拦截规则,创建时随任务在同一事务内写入 task_intercept_rules。
@@ -214,6 +216,13 @@ type TaskCreateOptions struct {
 // CreateTaskWithOptions creates an exploration, task, direct source relations,
 // and the ordered task LLM chain in one transaction.
 func (d *DB) CreateTaskWithOptions(description, goal string, opts TaskCreateOptions) (*Task, error) {
+	if err := d.ValidateWorkerLLMProfileIDs(opts.WorkerLLMProfileIDs); err != nil {
+		return nil, err
+	}
+	workerProfiles, err := json.Marshal(append([]int64{}, opts.WorkerLLMProfileIDs...))
+	if err != nil {
+		return nil, err
+	}
 	if err := NormalizeNoResultOptions(&opts); err != nil {
 		return nil, err
 	}
@@ -288,12 +297,12 @@ VALUES ($1, 'fact', $2, 0, 'origin', 'system')`, expID, string(originPayload)); 
 		CompanyIDs:      append([]int64(nil), opts.CompanyIDs...),
 		NoResultSeconds: opts.NoResultSeconds, NoResultMinFindings: opts.NoResultMinFindings, NoResultMinSeverity: opts.NoResultMinSeverity,
 		TimeoutSeconds: opts.TimeoutSeconds, PlanHeartbeatSeconds: opts.PlanHeartbeatSeconds,
-		CoverageEnabled: coverageEnabled, ShareGlobalAssets: opts.ShareGlobalAssets, WorkerCount: opts.WorkerCount, Remark: opts.Remark,
+		CoverageEnabled: coverageEnabled, ShareGlobalAssets: opts.ShareGlobalAssets, WorkerCount: opts.WorkerCount, WorkerLLMProfileIDs: append([]int64{}, opts.WorkerLLMProfileIDs...), Remark: opts.Remark,
 	}
 	if err := tx.QueryRow(`
-INSERT INTO tasks(name, remark, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, coverage_enabled, worker_count, share_global_assets, no_result_seconds, no_result_min_findings, no_result_min_severity)
-VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-RETURNING id, status, paused, created_at`, opts.Name, opts.Remark, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, coverageEnabled, opts.WorkerCount, opts.ShareGlobalAssets, opts.NoResultSeconds, opts.NoResultMinFindings, opts.NoResultMinSeverity).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
+INSERT INTO tasks(name, remark, category_id, description, goal, exploration_id, llm_profile_id, active_llm_profile_id, timeout_seconds, plan_heartbeat_seconds, coverage_enabled, worker_count, share_global_assets, no_result_seconds, no_result_min_findings, no_result_min_severity, worker_llm_profile_ids)
+VALUES ($1,$2,$3,$4,$5,$6,$7,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16::jsonb)
+RETURNING id, status, paused, created_at`, opts.Name, opts.Remark, opts.CategoryID, description, goal, expID, active, opts.TimeoutSeconds, opts.PlanHeartbeatSeconds, coverageEnabled, opts.WorkerCount, opts.ShareGlobalAssets, opts.NoResultSeconds, opts.NoResultMinFindings, opts.NoResultMinSeverity, string(workerProfiles)).Scan(&t.ID, &t.Status, &t.Paused, &t.CreatedAt); err != nil {
 		return nil, err
 	}
 	if err := insertTaskRelations(tx, t.ID, opts.SourceTaskIDs); err != nil {
@@ -430,11 +439,15 @@ func insertTaskLLMProfiles(tx *sql.Tx, taskID int64, profileIDs []int64) error {
 
 const taskCols = `id, COALESCE(name,''), remark, category_id,
 COALESCE((SELECT category.name FROM task_categories category WHERE category.id=tasks.category_id),''),
-description, goal, exploration_id, status, paused, COALESCE(pause_reason,''), queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), share_global_assets, COALESCE(worker_count,0), first_run_at, deadline_at, COALESCE(active_run_seconds,0), run_segment_started_at, no_result_seconds, no_result_min_findings, no_result_min_severity, no_result_base_seconds, no_result_checked_at, stop_reason`
+description, goal, exploration_id, status, paused, COALESCE(pause_reason,''), queued, queued_at, COALESCE(queue_mode,''), llm_profile_id, active_llm_profile_id, COALESCE(parent_ref,''), pinned_at, created_at, completed_at, COALESCE(timeout_seconds,0), COALESCE(plan_heartbeat_seconds,300), COALESCE(coverage_enabled,true), share_global_assets, COALESCE(worker_count,0), first_run_at, deadline_at, COALESCE(active_run_seconds,0), run_segment_started_at, no_result_seconds, no_result_min_findings, no_result_min_severity, no_result_base_seconds, no_result_checked_at, stop_reason, worker_llm_profile_ids`
 
 func scanTask(sc interface{ Scan(...any) error }) (*Task, error) {
 	var t Task
-	if err := sc.Scan(&t.ID, &t.Name, &t.Remark, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.PauseReason, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.ShareGlobalAssets, &t.WorkerCount, &t.FirstRunAt, &t.DeadlineAt, &t.ActiveRunSeconds, &t.RunSegmentStartedAt, &t.NoResultSeconds, &t.NoResultMinFindings, &t.NoResultMinSeverity, &t.NoResultBaseSeconds, &t.NoResultCheckedAt, &t.StopReason); err != nil {
+	var workerProfiles []byte
+	if err := sc.Scan(&t.ID, &t.Name, &t.Remark, &t.CategoryID, &t.CategoryName, &t.Description, &t.Goal, &t.ExplorationID, &t.Status, &t.Paused, &t.PauseReason, &t.Queued, &t.QueuedAt, &t.QueueMode, &t.LLMProfileID, &t.ActiveLLMProfileID, &t.ParentRef, &t.PinnedAt, &t.CreatedAt, &t.CompletedAt, &t.TimeoutSeconds, &t.PlanHeartbeatSeconds, &t.CoverageEnabled, &t.ShareGlobalAssets, &t.WorkerCount, &t.FirstRunAt, &t.DeadlineAt, &t.ActiveRunSeconds, &t.RunSegmentStartedAt, &t.NoResultSeconds, &t.NoResultMinFindings, &t.NoResultMinSeverity, &t.NoResultBaseSeconds, &t.NoResultCheckedAt, &t.StopReason, &workerProfiles); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(workerProfiles, &t.WorkerLLMProfileIDs); err != nil {
 		return nil, err
 	}
 	t.Pinned = t.PinnedAt != nil
@@ -476,20 +489,31 @@ ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC NULLS LAST, id DESC`)
 
 // TaskPatch updates editable metadata, asset visibility, and worker concurrency.
 type TaskPatch struct {
-	Name              *string
-	Remark            *string
-	Pinned            *bool
-	ShareGlobalAssets *bool
-	WorkerCount       *int
+	WorkerLLMProfileIDs *[]int64
+	WorkerCount         *int
+	Name                *string
+	Remark              *string
+	Pinned              *bool
+	ShareGlobalAssets   *bool
 }
 
 // UpdateTask applies a partial metadata/runtime-policy mutation and returns the updated row.
 // Re-pinning an already pinned task preserves its original position.
 func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
-	if patch.WorkerCount != nil {
-		if err := validateWorkerCount(*patch.WorkerCount); err != nil {
+	if patch.WorkerCount != nil && (*patch.WorkerCount < 0 || *patch.WorkerCount > MaxTaskWorkerCount) {
+		return nil, fmt.Errorf("Worker 数量必须在 0 到 %d 之间", MaxTaskWorkerCount)
+	}
+	var workerProfiles any
+	if patch.WorkerLLMProfileIDs != nil {
+		if err := d.ValidateWorkerLLMProfileIDs(*patch.WorkerLLMProfileIDs); err != nil {
 			return nil, err
 		}
+		ids := append([]int64{}, (*patch.WorkerLLMProfileIDs)...)
+		raw, err := json.Marshal(ids)
+		if err != nil {
+			return nil, err
+		}
+		workerProfiles = string(raw)
 	}
 	task, err := scanTask(d.QueryRow(`UPDATE tasks SET
 	name = CASE WHEN $2::boolean THEN $3 ELSE name END,
@@ -500,9 +524,10 @@ func (d *DB) UpdateTask(id int64, patch TaskPatch) (*Task, error) {
 		ELSE NULL
 	END,
 	share_global_assets = COALESCE($7::boolean, share_global_assets),
-	worker_count = COALESCE($8::integer, worker_count)
+	worker_count = COALESCE($8::integer, worker_count),
+ worker_llm_profile_ids = COALESCE($9::jsonb, worker_llm_profile_ids)
 WHERE id=$1 AND deleted_at IS NULL
-RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.Remark != nil, patch.Remark, patch.ShareGlobalAssets, patch.WorkerCount))
+RETURNING `+taskCols, id, patch.Name != nil, patch.Name, patch.Pinned, patch.Remark != nil, patch.Remark, patch.ShareGlobalAssets, patch.WorkerCount, workerProfiles))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -862,4 +887,28 @@ DELETE FROM assets a USING deletable d WHERE a.id=d.id`, id, expID)
 		return result, err
 	}
 	return result, tx.Commit()
+}
+
+// ValidateWorkerLLMProfileIDs checks references only; credentials stay in llm_profiles.
+// Position is the Worker ordinal; zero means task default, empty restores legacy routing.
+func (d *DB) ValidateWorkerLLMProfileIDs(ids []int64) error {
+	if len(ids) > MaxTaskWorkerCount {
+		return fmt.Errorf("最多分配 %d 个 Worker", MaxTaskWorkerCount)
+	}
+	for _, id := range ids {
+		if id < 0 {
+			return fmt.Errorf("LLM 配置 ID 不能为负数")
+		}
+		if id == 0 {
+			continue
+		}
+		profile, err := d.ProfileByID(id)
+		if err != nil {
+			return err
+		}
+		if profile == nil {
+			return fmt.Errorf("LLM 配置 #%d 不存在", id)
+		}
+	}
+	return nil
 }

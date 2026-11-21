@@ -53,6 +53,7 @@ type taskLLMRuntime struct {
 	taskID       string
 	agentKey     string
 	pinProfileID *int64
+	taskDefault  bool
 }
 
 type taskLLMError struct {
@@ -135,7 +136,7 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 	r.s.syncTaskLLMState(pt)
 	t, _ := r.s.m.Task(r.taskID)
 	sel := taskLLMSelection{task: t, revision: pt.LLMChainRevision}
-	if prov, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
+	if prov, cfg, ok := r.bindingProvider(); ok {
 		sel.provider, sel.retry = prov, cfg.Retry
 		return sel, nil
 	}
@@ -177,7 +178,7 @@ func (r *taskLLMRuntime) activeCfg() (agent.Config, bool) {
 	if err != nil || pt == nil {
 		return agent.Config{}, false
 	}
-	if _, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
+	if _, cfg, ok := r.bindingProvider(); ok {
 		return cfg, true
 	}
 	if len(pt.LLMProfileIDs) > 0 && pt.ActiveLLMProfileID != nil {
@@ -477,7 +478,7 @@ func (r *taskLLMRuntime) CompactionWindow() int {
 		}
 		return (agent.Config{}).CompactionWindow()
 	}
-	if _, cfg, ok := r.s.agentBindingProvider(r.agentKey); ok {
+	if _, cfg, ok := r.bindingProvider(); ok {
 		return cfg.CompactionWindow()
 	}
 	taskNum, err := parseTaskID(r.taskID)
@@ -630,12 +631,13 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 }
 
 func (s *Server) workerForTaskSlot(t *Task, slot WorkerSlot) (*agent.Worker, error) {
-	if slot.ProfileID <= 0 {
-		return nil, errors.New("worker slot is not pinned")
+	if slot.ProfileID <= 0 && !slot.TaskDefault {
+		return nil, errors.New("worker slot has no model assignment")
 	}
-	_, cfg, ok := s.providerForProfile(slot.ProfileID)
-	if !ok {
-		return nil, fmt.Errorf("LLM profile #%d is missing or invalid", slot.ProfileID)
+	if slot.ProfileID > 0 {
+		if _, _, ok := s.providerForProfile(slot.ProfileID); !ok {
+			return nil, fmt.Errorf("LLM profile #%d is missing or invalid", slot.ProfileID)
+		}
 	}
 	s.taskAgentMu.Lock()
 	bundle := s.taskAgents[t.ID]
@@ -655,9 +657,12 @@ func (s *Server) workerForTaskSlot(t *Task, slot WorkerSlot) (*agent.Worker, err
 		return worker, nil
 	}
 	id := slot.ProfileID
-	runtime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker", pinProfileID: &id}
+	runtime := &taskLLMRuntime{s: s, taskID: t.ID, agentKey: "worker", taskDefault: slot.TaskDefault}
+	if id > 0 {
+		runtime.pinProfileID = &id
+	}
 	tx := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
-	worker := agent.NewWorker(runtime, cfg.Model, s.m.dir, tx, runtime.CompactionWindow(), s.agentMaxTurns("worker"))
+	worker := agent.NewWorker(runtime, "task-router", s.m.dir, tx, runtime.CompactionWindow(), s.agentMaxTurns("worker"))
 	worker.SetFindingRecorder(s.evidenceStore())
 	worker.SetCompactionWindowResolver(runtime.CompactionWindow)
 	worker.SetNonStreaming(runtime.nonStreaming)
@@ -763,4 +768,11 @@ func (s *Server) emitManualTaskLLMSwitch(t *Task, previousID, nextID *int64) db.
 		Mode: "manual", Reason: "用户手动切换任务 LLM", Previous: previous, Next: next,
 	}})
 	return s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "llm_switch", Summary: summary, Detail: summary, Metadata: metadata})
+}
+
+func (r *taskLLMRuntime) bindingProvider() (llm.Provider, agent.Config, bool) {
+	if r.taskDefault {
+		return nil, agent.Config{}, false
+	}
+	return r.s.agentBindingProvider(r.agentKey)
 }

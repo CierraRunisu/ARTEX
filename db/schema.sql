@@ -567,6 +567,7 @@ ALTER TABLE tasks ADD COLUMN IF NOT EXISTS coverage_enabled BOOLEAN NOT NULL DEF
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS share_global_assets BOOLEAN NOT NULL DEFAULT false;
 -- 任务级 Worker 运行数量;0=用全局默认(settings.workers)。补旧库。
 ALTER TABLE tasks ADD COLUMN IF NOT EXISTS worker_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS worker_llm_profile_ids JSONB NOT NULL DEFAULT '[]'::jsonb;
 -- queued_at makes admission FIFO reflect the actual enqueue order rather than the
 -- task creation order. queue_mode distinguishes first bootstrap from resuming an
 -- exploration that already owns goals/history.

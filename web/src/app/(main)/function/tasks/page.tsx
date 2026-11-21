@@ -1,4 +1,5 @@
 "use client";
+import { WorkerModelPicker } from "@/components/worker-model-picker";
 
 import * as React from "react";
 
@@ -3604,6 +3605,8 @@ function CreateTaskSheet({
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // 创建时下发种子意图,worker 免等首轮 planner 直接开跑;默认关闭,走标准先规划再执行
   const [shareGlobalAssets, setShareGlobalAssets] = React.useState(false);
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // 资产覆盖度功能;默认开。关闭=不计算/展示覆盖度、不累积范围、隐藏范围类工具(company 关联不受影响)
+  const [workerLLMProfileIDs, setWorkerLLMProfileIDs] = React.useState<number[]>([]);
+  const [globalWorkerCount, setGlobalWorkerCount] = React.useState(3);
   const [workerCount, setWorkerCount] = React.useState(""); // 本任务 Worker 数;空/0=用全局默认
   const [interceptRules, setInterceptRules] = React.useState<AssetInterceptRuleInput[]>([]); // 任务级资产拦截规则(仅本任务生效,不进全局表)
   const [scheduleEnabled, setScheduleEnabled] = React.useState(false);
@@ -3636,6 +3639,11 @@ function CreateTaskSheet({
       .then(setCompanies)
       .catch(() => setCompanies([]));
   }, []);
+
+  React.useEffect(() => {
+    if (open) void api.settings().then((settings) => setGlobalWorkerCount(settings.workers ?? 3)).catch(() => {});
+  }, [open]);
+  const workerModelCount = Math.min(MAX_TASK_WORKER_COUNT, Math.max(1, parseWorkerCountInput(workerCount) || globalWorkerCount));
 
   // pickFiles uploads the chosen files into this draft's staging dir and appends their
   // absolute paths to the description; the task's agents open them by path via Read/Bash.
@@ -3695,6 +3703,7 @@ function CreateTaskSheet({
         coverageEnabled,
         shareGlobalAssets,
         workerCount: workerCountNum,
+        workerLLMProfileIds: Array.from({ length: Math.max(workerModelCount, workerLLMProfileIDs.length) }, (_, i) => workerLLMProfileIDs[i] ?? 0),
         schedule: scheduleEnabled
           ? { ...schedule, name: schedule.name.trim() || translate("taskUI.defaultSchedule"), task_ids: [] }
           : undefined,
@@ -3721,6 +3730,7 @@ function CreateTaskSheet({
       setCoverageEnabled(true);
       setShareGlobalAssets(false);
       setWorkerCount("");
+      setWorkerLLMProfileIDs([]);
       setInterceptRules([]);
       setScheduleEnabled(false);
       setSchedule({
@@ -3782,6 +3792,7 @@ function CreateTaskSheet({
                 setCategoryID(template.category_id ?? undefined);
                 setInterceptRules(template.intercept_rules ?? []);
                 setWorkerCount(template.worker_count ? String(template.worker_count) : "");
+                setWorkerLLMProfileIDs([]);
                 setUploadCount(0);
               }}
               portalContainer={sheetContentRef}
@@ -4138,6 +4149,12 @@ function CreateTaskSheet({
                     onChange={(e) => setWorkerCount(e.target.value)}
                   />
                   <p className="text-muted-foreground text-xs">{translate("taskUI.workerCountHelp")}</p>
+                </div>
+                <div className="grid gap-3">
+                  <Label>{translate("taskUI.workerModelsTitle")}</Label>
+                  <p className="text-muted-foreground text-xs">{translate("taskUI.workerModelsCreateHelp")}</p>
+                  <WorkerModelPicker profiles={profiles} count={workerModelCount} value={workerLLMProfileIDs}
+                    onChange={setWorkerLLMProfileIDs} idPrefix="new-task-worker-model" disabled={creating} />
                 </div>
                 <div className="grid gap-2">
                   <label htmlFor="seed-first-intent" className="flex items-center gap-2 text-sm">

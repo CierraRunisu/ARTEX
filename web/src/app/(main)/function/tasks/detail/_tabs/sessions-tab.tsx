@@ -54,6 +54,7 @@ import { api, openSSE } from "@/lib/api";
 import { shouldSubmitOnKey, useChatSendMode } from "@/lib/chat-send-mode";
 import { MOCK } from "@/lib/mock/enabled";
 import { isBtwCommand } from "@/lib/side-questions";
+import { workerSessionResolution, workerSessionSlot } from "@/lib/worker-session-resolution";
 import { taskAssetSourceLabel, taskAssetTypeLabel } from "@/lib/task-assets";
 import type {
   Activity,
@@ -336,6 +337,7 @@ function intentToSession(n: TaskNode): Session {
     live: !n.inherited && state === "running",
     last_activity: n.ts,
     intent_id: n.id,
+    worker: n.owner,
     source_task_id: n.source_task_id,
     inherited: n.inherited,
   };
@@ -1606,9 +1608,11 @@ export function SessionsTab({ taskId, requestedSession = "" }: { taskId: string;
     if (!llmResolutions || session.inherited || session.role === "system") return undefined;
     if (session.role === "mainagent") return llmResolutions.mainagent;
     if (session.role === "planner") return llmResolutions.planner;
-    return llmResolutions.worker;
+    return workerSessionResolution(llmResolutions, session, store[`intent:${session.intent_id}`]?.items ?? []);
   };
   const activeResolution = resolutionForSession(active);
+  const activeWorkerSlot = active.role === "worker"
+    ? workerSessionSlot(active, activeState?.items ?? []) : undefined;
   const activeAssets =
     active.role === "worker" && active.intent_id ? intentAssetsByID.get(active.intent_id) : undefined;
 
@@ -1812,6 +1816,13 @@ export function SessionsTab({ taskId, requestedSession = "" }: { taskId: string;
                 );
               })()}
               <SideQuestionButton side={side} />
+              {activeResolution && active.role === "worker" && (
+                <Badge variant="outline" className="shrink-0 font-normal">
+                  {activeWorkerSlot ? `Worker #${activeWorkerSlot.slice(5)}` : "Worker"}
+                  {" · "}{llmResolutions?.workers_applied ? ui("taskUI.workerModelApplied") : ui("taskUI.workerModelNext")}
+                  {llmResolutions?.workers_applied && llmResolutions.workers_converged === false && ` · ${ui("taskUI.workerModelsDraining")}`}
+                </Badge>
+              )}
               {activeResolution && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -1835,6 +1846,9 @@ export function SessionsTab({ taskId, requestedSession = "" }: { taskId: string;
                     {activeResolution.available
                       ? [resolutionLabel(activeResolution, ui), activeResolution.model].filter(Boolean).join(" / ")
                       : activeResolution.reason || ui("screen.b0733bf9f39537")}
+                    {active.role === "worker" && (
+                      <div className="mt-1">{ui("taskUI.workerModelResolutionHelp")}</div>
+                    )}
                   </TooltipContent>
                 </Tooltip>
               )}

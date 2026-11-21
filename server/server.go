@@ -1735,6 +1735,7 @@ func truncateReply(s string) string {
 }
 
 type createTaskReq struct {
+	WorkerLLMProfileIDs  []int64          `json:"worker_llm_profile_ids,omitempty"`
 	Schedule             *scheduleRequest `json:"schedule,omitempty"`
 	Name                 string           `json:"name,omitempty"` // 可选任务名称;省略/空=未命名
 	CategoryID           *int64           `json:"category_id,omitempty"`
@@ -1836,6 +1837,11 @@ func (s *Server) createTaskFromRequest(req createTaskReq) (*Task, *taskCreateErr
 	if err != nil {
 		return nil, &taskCreateError{400, err.Error()}
 	}
+	if len(req.WorkerLLMProfileIDs) > 0 {
+		if err := s.m.pg.ValidateWorkerLLMProfileIDs(req.WorkerLLMProfileIDs); err != nil {
+			return nil, &taskCreateError{400, err.Error()}
+		}
+	}
 	if req.WorkerCount < 0 {
 		return nil, &taskCreateError{400, "Worker 运行数量不能为负数"}
 	}
@@ -1848,11 +1854,12 @@ func (s *Server) createTaskFromRequest(req createTaskReq) (*Task, *taskCreateErr
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		NoResultSeconds: req.NoResultSeconds, NoResultMinFindings: req.NoResultMinFindings, NoResultMinSeverity: req.NoResultMinSeverity,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
-		CoverageEnabled:   req.CoverageEnabled,
-		ShareGlobalAssets: req.ShareGlobalAssets,
-		Remark:            remark,
-		WorkerCount:       req.WorkerCount,
-		InterceptRules:    interceptRules,
+		CoverageEnabled:     req.CoverageEnabled,
+		ShareGlobalAssets:   req.ShareGlobalAssets,
+		Remark:              remark,
+		WorkerCount:         req.WorkerCount,
+		WorkerLLMProfileIDs: req.WorkerLLMProfileIDs,
+		InterceptRules:      interceptRules,
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {

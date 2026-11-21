@@ -60,6 +60,47 @@ func TestTaskMetadataPatchReturnsRenameAndPin(t *testing.T) {
 	}
 }
 
+func TestTaskMetadataPatchWorkerCountAuthenticated(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Fatalf("test database unavailable: %v", err)
+	}
+	defer m.Close()
+	task, err := m.CreateTask("worker settings", "no external actions", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer m.DeleteTask(task.ID, DeleteTaskOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	s := New(ctx, m, t.TempDir(), t.TempDir(), t.TempDir())
+	defer func() { cancel(); s.Close() }()
+	token, _ := signJWT(s.jwtKey)
+	for _, tc := range []struct {
+		body   string
+		status int
+		count  int
+	}{
+		{`{"worker_count":1}`, 200, 1},
+		{`{"worker_count":50}`, 200, 50},
+		{`{"worker_count":0}`, 200, 0},
+		{`{"worker_count":-1}`, 400, 0},
+		{`{"worker_count":51}`, 400, 0},
+		{`{"worker_count":1.5}`, 400, 0},
+		{`{"worker_count":"2"}`, 400, 0},
+	} {
+		req := httptest.NewRequest(http.MethodPatch, "/api/tasks/"+task.ID, strings.NewReader(tc.body))
+		req.Header.Set("Authorization", "Bearer "+token)
+		rec := httptest.NewRecorder()
+		s.Handler().ServeHTTP(rec, req)
+		if rec.Code != tc.status {
+			t.Fatalf("%s: status=%d body=%s", tc.body, rec.Code, rec.Body.String())
+		}
+		if task.lifecycleSnapshot().WorkerCount != tc.count {
+			t.Fatalf("%s: unexpected in-memory count", tc.body)
+		}
+	}
+}
+
 func TestTaskMetadataPatchGlobalAssetSharing(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

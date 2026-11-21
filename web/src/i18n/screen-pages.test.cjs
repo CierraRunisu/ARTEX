@@ -47,7 +47,7 @@ function load(inputFile) {
           ? load(base + "/src/" + id.slice(2))
           : id.startsWith(".")
             ? load(path.resolve(path.dirname(file), id))
-            : id === "react" && file.endsWith("/components/intelligence-panel.tsx")
+            : id === "react" && file.split(path.sep).join("/").endsWith("/components/intelligence-panel.tsx")
               ? {
                   ...React,
                   useState(initial) {
@@ -128,8 +128,24 @@ test("all task detail tabs render their English fixed UI", async () => {
   assert.doesNotMatch(visible(render(IntelligencePanel, { scope: "tasks", scopeId: "1" })), /[\p{Script=Han}]/u);
 });
 
+test("per-task LLM settings remain editable for paused and completed tasks in both locales", async () => {
+  const { TaskLLMSettings } = load(base + "/src/components/task-llm-settings.tsx");
+  for (const task of [{ id: "1", status: "created", paused: true }, { id: "2", status: "done" }]) {
+    await i18n.changeLanguage("en");
+    const english = visible(render(TaskLLMSettings, { task, onUpdated: noop }));
+    assert.match(english, /Task LLM/);
+    assert.match(english, /Save models/);
+    assert.match(english, /Clear and inherit global/);
+    assert.doesNotMatch(english, /[\p{Script=Han}]/u);
+    await i18n.changeLanguage("zh-CN");
+    const chinese = visible(render(TaskLLMSettings, { task, onUpdated: noop }));
+    assert.match(chinese, /本任务 LLM/);
+    assert.match(chinese, /保存模型设置/);
+  }
+});
+
 test("intelligence renders real preview responses, populated records and localized errors", async () => {
-  const file = base + "/src/components/intelligence-panel.tsx";
+  const file = path.resolve(base, "src/components/intelligence-panel.tsx");
   const { IntelligencePanel } = load(file);
   const transport = load(base + "/src/lib/mock/handler.ts");
   const original = "原始情报内容";
@@ -335,6 +351,40 @@ test("every fixed UI key resolves and English resources contain no untranslated 
       };
       walk(tree);
     }
+});
+
+test("task Worker model assignment renders one labeled selector per Worker in both languages", async () => {
+  const { TaskWorkerModels } = load(base + "/src/components/task-worker-models.tsx");
+  for (const language of ["en", "zh-CN"]) {
+    await i18n.changeLanguage(language);
+    const html = render(TaskWorkerModels, { task: { id: "local", paused: true, worker_count: 2 }, onUpdated: noop });
+    const text = visible(html);
+    assert.match(text, /Worker #1/);
+    assert.match(text, /Worker #2/);
+    assert.doesNotMatch(text, /Worker #3/);
+    assert.match(html, /for="worker-model-local-0"/);
+    assert.match(html, /id="worker-model-local-0"/);
+    if (language === "en") {
+      assert.match(text, /Follow task default/);
+      assert.match(text, /Save Worker models/);
+      assert.doesNotMatch(text, /[\p{Script=Han}]/u);
+    } else assert.match(text, /保存 Worker 模型分配/);
+  }
+});
+
+test("shared Worker picker displays independent initial selections for task creation", async () => {
+  await i18n.changeLanguage("en");
+  const { WorkerModelPicker } = load(base + "/src/components/worker-model-picker.tsx");
+  const html = render(WorkerModelPicker, {
+    profiles: [{ id: "7", name: "API A", model: "model-a" }, { id: "9", name: "API B", model: "model-b" }],
+    count: 3, value: [7, 0, 9], onChange: noop, idPrefix: "new-task-worker-model",
+  });
+  const selected = Array.from(html.matchAll(/<select[^>]*>([\s\S]*?)<\/select>/g), (match) => match[1]);
+  assert.equal(selected.length, 3);
+  assert.match(selected[0], /value="7"[^>]*selected/);
+  assert.match(selected[1], /value="0"[^>]*selected/);
+  assert.match(selected[2], /value="9"[^>]*selected/);
+  assert.match(html, /new-task-worker-model-2/);
 });
 
 test("Repeater renders persisted drafts with translated default group and preserves raw packets", async () => {

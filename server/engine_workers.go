@@ -21,6 +21,7 @@ type workerSlotRuntime struct {
 	slot    WorkerSlot
 	idleCtx context.Context
 	retire  context.CancelFunc // stops claiming/sleeping, never cancels Execute
+	done    chan struct{}      // closed after final writes and replacement publication
 }
 
 func (e *Engine) desiredWorkerSlots(t *Task) []WorkerSlot {
@@ -50,7 +51,11 @@ func (e *Engine) ReconcileWorkers(t *Task) {
 	if pool.runtime.ctx.Err() != nil {
 		return
 	}
-	slots := e.desiredWorkerSlots(t)
+	e.reconcileWorkerSlotsLocked(pool, e.desiredWorkerSlots(t))
+}
+
+// Caller holds deleteMu.RLock and pool.mu. Only changed slots retire.
+func (e *Engine) reconcileWorkerSlotsLocked(pool *taskWorkerPool, slots []WorkerSlot) {
 	pool.desired = make(map[string]WorkerSlot, len(slots))
 	for _, slot := range slots {
 		pool.desired[slot.Name] = slot
@@ -95,17 +100,17 @@ func (e *Engine) WorkerCounts(t *Task) (actual, target int) {
 // from StopTask.Wait, including replacements started as a retiree exits.
 func (e *Engine) startWorkerSlotLocked(pool *taskWorkerPool, slot WorkerSlot) {
 	idleCtx, retire := context.WithCancel(pool.runtime.ctx)
-	loop := &workerSlotRuntime{pool: pool, slot: slot, idleCtx: idleCtx, retire: retire}
+	loop := &workerSlotRuntime{pool: pool, slot: slot, idleCtx: idleCtx, retire: retire, done: make(chan struct{})}
 	pool.loops[slot.Name] = loop
 	// Publish a fresh immutable routing snapshot. Retired slot routes remain
 	// available for human continuation of paused intents until the name is reused.
-	plan := make(map[string]int64)
+	plan := make(map[string]WorkerSlot)
 	if old, ok := e.slotPlans.Load(pool.task.ID); ok {
-		for name, profile := range old.(map[string]int64) {
+		for name, profile := range old.(map[string]WorkerSlot) {
 			plan[name] = profile
 		}
 	}
-	plan[slot.Name] = slot.ProfileID
+	plan[slot.Name] = slot
 	e.slotPlans.Store(pool.task.ID, plan)
 	pool.runtime.wg.Add(1)
 	runTaskRoutine(pool.runtime, func(ctx context.Context) {
@@ -115,6 +120,7 @@ func (e *Engine) startWorkerSlotLocked(pool *taskWorkerPool, slot WorkerSlot) {
 }
 
 func (e *Engine) finishWorkerSlot(loop *workerSlotRuntime) {
+	defer close(loop.done)
 	loop.retire()
 	e.deleteMu.RLock()
 	defer e.deleteMu.RUnlock()
@@ -126,6 +132,31 @@ func (e *Engine) finishWorkerSlot(loop *workerSlotRuntime) {
 	if !e.IsDeleting(pool.task.ID) && pool.runtime.ctx.Err() == nil {
 		if slot, needed := pool.desired[loop.slot.Name]; needed {
 			e.startWorkerSlotLocked(pool, slot)
+		}
+	}
+}
+
+// Resume retains its pause barrier until retiring generations finish settlement.
+// Do not hold pool.mu or deleteMu while waiting: finishWorkerSlot needs both.
+func (e *Engine) waitWorkerReconciliation(t *Task) {
+	value, ok := e.workerPools.Load(t.ID)
+	if !ok {
+		return
+	}
+	pool := value.(*taskWorkerPool)
+	pool.mu.Lock()
+	var draining []<-chan struct{}
+	for _, loop := range pool.loops {
+		if loop.idleCtx.Err() != nil {
+			draining = append(draining, loop.done)
+		}
+	}
+	pool.mu.Unlock()
+	for _, done := range draining {
+		select {
+		case <-done:
+		case <-pool.runtime.ctx.Done():
+			return
 		}
 	}
 }

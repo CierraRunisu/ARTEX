@@ -481,6 +481,8 @@ export const settingsMessages = {
     "；单任务覆盖值不受影响。增容启动新 Worker loops；缩容等待在跑意图完成后退出，不会强杀，实际数量可能暂时高于目标。",
     "; per-task overrides are unchanged. Scaling up starts new Worker loops; scaling down lets running intents finish before loops exit, without force-cancelling them. Actual counts may temporarily exceed target.",
   ],
+  "settings.futureTasksOnly": ["对新启动及暂停后继续运行的任务生效", "apply to newly started and paused/resumed tasks"],
+  "settings.runningTasksUnchanged": ["；单独设置了 Worker 数的任务使用自己的设置，运行中的任务需暂停再继续。", "; task overrides take priority. Pause and resume running tasks to apply changes."],
   "settings.workerPools": ["多模型 Worker 池", "Model pools"],
   "settings.addPool": ["添加模型池", "Add model pool"],
   "settings.unavailableProfile": ["配置 #{{id}} 已删除/不可用", "Profile #{{id}} deleted or unavailable"],

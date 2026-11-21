@@ -151,7 +151,7 @@ type Engine struct {
 	resolveAuthoritative bool
 	workerResolve        func(t *Task, slot WorkerSlot) (*agent.Worker, error)
 	slotState            sync.Map // task/slot -> slotAvailability
-	slotPlans            sync.Map // task -> immutable snapshot of slot name/profile routing
+	slotPlans            sync.Map // task -> immutable map[slot name]WorkerSlot; includes retired continuation routes
 	// readiness reports whether a global LLM provider is configured — the signal behind
 	// Ready()/the llm_configured indicator. Wired once at startup; nil → not ready.
 	readiness    func() bool
@@ -330,6 +330,13 @@ func (e *Engine) Resume(t *Task) {
 	// is waiting for task operations to drain.
 	if t == nil {
 		return
+	}
+	if e.m != nil && e.IsPaused(t.ID) && e.Started(t.ID) {
+		// Keep the pause barrier until every retired worker has finished its
+		// final writes. All admission paths (including bootstrap/queue recovery)
+		// pass here, so they inherit the latest saved concurrency on resume.
+		e.ReconcileWorkers(t)
+		e.waitWorkerReconciliation(t)
 	}
 	e.deleteMu.RLock()
 	defer e.deleteMu.RUnlock()
@@ -767,6 +774,9 @@ func (e *Engine) reportSlotAvailability(t *Task, slot WorkerSlot, err error) {
 		e.slotState.Store(key, state)
 	}
 	summary := fmt.Sprintf("%s 绑定的 LLM 配置 #%d 不可用（已删除或配置无效），该会话暂停领取任务，不会回退到默认模型", slot.Name, slot.ProfileID)
+	if slot.TaskDefault && slot.ProfileID == 0 {
+		summary = slot.Name + " 的任务默认模型不可用，该会话暂停领取任务"
+	}
 	e.emitActivity(t, db.Activity{Worker: "system", Kind: "text", IsError: true, Summary: summary, Detail: err.Error()})
 	log.Printf("[worker %s] task %s pinned profile #%d unavailable: %v", slot.Name, t.ID, slot.ProfileID, err)
 }
@@ -830,23 +840,45 @@ func (e *Engine) Run(ctx context.Context, t *Task) {
 	}
 }
 
-// workerSlotsForTask preserves an explicit task concurrency override. Tasks
-// using the global default inherit its model pools and their pinned profiles.
+// workerSlotsForTask applies per-task assignments independently of concurrency.
+// Tasks without assignments retain the original global model-pool behavior.
 func workerSlotsForTask(t *Task, pools []WorkerPool, global int) ([]WorkerSlot, error) {
-	if t != nil && t.lifecycleSnapshot().WorkerCount > 0 {
-		return ExpandWorkerSlots(nil, workerCountForTask(t, global))
+	if t != nil {
+		state := t.lifecycleSnapshot()
+		if len(state.WorkerLLMProfileIDs) > 0 {
+			// The global pool still determines inherited concurrency, never these models.
+			count := workerCountForTask(t, global)
+			slots, err := ExpandWorkerSlots(nil, count)
+			if err != nil {
+				return nil, err
+			}
+			for i := range slots {
+				slots[i].TaskDefault = true
+				if i < len(state.WorkerLLMProfileIDs) {
+					slots[i].ProfileID = state.WorkerLLMProfileIDs[i]
+				}
+			}
+			return slots, nil
+		}
+		if state.WorkerCount > 0 {
+			return ExpandWorkerSlots(nil, workerCountForTask(t, global))
+		}
 	}
 	return ExpandWorkerSlots(pools, global)
 }
 
 func workerCountForTask(t *Task, global int) int {
+	count := 0
 	if t != nil {
-		if count := t.lifecycleSnapshot().WorkerCount; count > 0 {
-			if count > db.MaxTaskWorkerCount {
-				return db.MaxTaskWorkerCount
-			}
-			return count
+		count = t.lifecycleSnapshot().WorkerCount
+	}
+	if count > 0 {
+		// Direct database edits can bypass validation; cap those values so the
+		// engine never starts more than the supported per-task worker count.
+		if count > db.MaxTaskWorkerCount {
+			return db.MaxTaskWorkerCount
 		}
+		return count
 	}
 	return global
 }
@@ -1010,7 +1042,7 @@ func (e *Engine) workerLoop(ctx context.Context, t *Task, slot WorkerSlot, contr
 		}
 		var worker *agent.Worker
 		var resolveErr error
-		if slot.ProfileID > 0 {
+		if slot.ProfileID > 0 || slot.TaskDefault {
 			if e.workerResolve == nil {
 				resolveErr = errors.New("pinned worker resolver unavailable")
 			} else {
@@ -1303,12 +1335,13 @@ func (e *Engine) runDetachedIntent(ctx context.Context, t *Task, intentID int64,
 	owner := node.Owner
 	var worker *agent.Worker
 	if value, ok := e.slotPlans.Load(t.ID); ok {
-		if plan, ok := value.(map[string]int64); ok {
-			if profileID, pinned := plan[owner]; pinned && profileID > 0 {
+		if plan, ok := value.(map[string]WorkerSlot); ok {
+			if slot, exists := plan[owner]; exists && (slot.ProfileID > 0 || slot.TaskDefault) {
+				profileID := slot.ProfileID
 				if e.workerResolve == nil {
 					return fmt.Errorf("意图所属的 LLM 配置 #%d 不可用：pinned worker resolver unavailable", profileID)
 				}
-				worker, err = e.workerResolve(t, WorkerSlot{Name: owner, ProfileID: profileID})
+				worker, err = e.workerResolve(t, slot)
 				if err != nil || worker == nil {
 					if err == nil {
 						err = errors.New("worker resolver returned no worker")

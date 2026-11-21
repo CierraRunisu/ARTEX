@@ -20,6 +20,8 @@ import {
 } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { TaskWorkerModels } from "@/components/task-worker-models";
+import { TaskLLMSettings } from "@/components/task-llm-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,6 +30,7 @@ import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import { type UITranslate, useUITranslation } from "@/i18n/use-ui-translation";
 import { api } from "@/lib/api";
+import { MAX_TASK_WORKER_COUNT, parseWorkerCountInput } from "@/lib/types";
 import type {
   AssetInterceptKind,
   AssetInterceptRule,
@@ -108,6 +111,32 @@ export function OverviewTab({ taskId }: { taskId: string }) {
   const { ui } = useUITranslation();
 
   const [task, setTask] = React.useState<Task | null>(null);
+  const [workerCountInput, setWorkerCountInput] = React.useState("");
+  const [workerSaving, setWorkerSaving] = React.useState(false);
+  const [workerMessage, setWorkerMessage] = React.useState("");
+  const [workerError, setWorkerError] = React.useState("");
+  React.useEffect(() => {
+    setWorkerCountInput(task?.worker_count ? String(task.worker_count) : "");
+  }, [task?.id, task?.worker_count]);
+  const saveWorkerCount = async () => {
+    const value = parseWorkerCountInput(workerCountInput);
+    setWorkerMessage("");
+    setWorkerError("");
+    if (value === null) {
+      setWorkerError(ui("taskUI.invalidWorkers", { max: MAX_TASK_WORKER_COUNT }));
+      return;
+    }
+    setWorkerSaving(true);
+    try {
+      const updated = await api.updateTask(taskId, { worker_count: value });
+      setTask(updated);
+      setWorkerMessage(ui("taskUI.workerSettingsSaved"));
+    } catch (error) {
+      setWorkerError(error instanceof Error ? error.message : ui("taskUI.workerSettingsFailed"));
+    } finally {
+      setWorkerSaving(false);
+    }
+  };
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [intents, setIntents] = React.useState<TaskNode[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
@@ -435,6 +464,36 @@ export function OverviewTab({ taskId }: { taskId: string }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">{ui("taskUI.workerSettingsTitle")}</CardTitle>
+          <CardDescription>{ui("taskUI.workerSettingsHelp")}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              aria-label={ui("taskUI.workerSettingsTitle")}
+              type="number"
+              min={0}
+              max={MAX_TASK_WORKER_COUNT}
+              step={1}
+              placeholder={ui("taskUI.globalDefault")}
+              className="w-52"
+              value={workerCountInput}
+              disabled={!task || workerSaving}
+              onChange={(event) => { setWorkerCountInput(event.target.value); setWorkerMessage(""); setWorkerError(""); }}
+              onKeyDown={(event) => { if (event.key === "Enter" && task && !workerSaving) void saveWorkerCount(); }}
+            />
+            <Button disabled={!task || workerSaving} onClick={() => void saveWorkerCount()}>
+              {ui("taskUI.workerSettingsSave")}
+            </Button>
+          </div>
+          {workerMessage && <p role="status" className="text-sm text-muted-foreground">{workerMessage}</p>}
+          {workerError && <p role="alert" className="text-sm text-destructive">{workerError}</p>}
+        </CardContent>
+      </Card>
+      <TaskWorkerModels task={task} onUpdated={(updated) => setTask(updated)} />
+      <TaskLLMSettings task={task} onUpdated={(patch) => setTask((current) => current ? { ...current, ...patch } : current)} />
       {/* 原始任务描述与目标(创建时填写的),置顶便于随时回看。 */}
       <Card>
         <CardHeader>

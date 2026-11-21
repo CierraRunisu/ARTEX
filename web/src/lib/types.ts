@@ -25,6 +25,7 @@ export interface Task {
   distinct_findings?: FindingDistinctStats;
   id: string;
   remark?: string;
+  worker_llm_profile_ids?: number[]; // Worker ordinal -> LLM profile; 0 = task default
   worker_count?: number; // 本任务 Worker 数;0/缺省=用全局默认
   worker_actual_count?: number; // 当前存活的 Worker pool loops，含缩容退出中的 loops
   worker_target_count?: number; // 当前期望的 Worker slots 数量
@@ -454,6 +455,7 @@ export interface TaskNode {
   priority: number; // 0..10
   state: string; // GoalState | IntentState | FindingState | HintState
   origin: string;
+  owner?: string; // actual work#N slot; independent of the intent ID
   ts: string;
   source_task_id?: string;
   inherited?: boolean;
@@ -723,7 +725,7 @@ export interface TaskLLMResolution {
   name: string;
   format: string;
   model: string;
-  source: "task_chain" | "agent_binding" | "global_profile" | "environment" | "global";
+  source: "task_chain" | "agent_binding" | "global_profile" | "environment" | "global" | "worker_assignment";
   available: boolean;
   reason?: string;
 }
@@ -732,6 +734,10 @@ export interface TaskLLMResolutions {
   mainagent: TaskLLMResolution;
   planner: TaskLLMResolution;
   worker: TaskLLMResolution;
+  workers?: Record<string, TaskLLMResolution>;
+  workers_applied?: boolean; // true = actual live slots, false = configured preview
+  workers_converged?: boolean;
+  workers_pending?: Record<string, TaskLLMResolution>;
 }
 
 // ---- Agent triggers (P3 调度，仅自定义 agent) ----
@@ -930,6 +936,7 @@ export interface Session {
   live: boolean;
   last_activity: string;
   intent_id?: string;
+  worker?: string; // work#N slot owning this intent
   source_task_id?: string;
   inherited?: boolean;
   seg?: number; // main-agent session: which conversation segment (0 = original)
