@@ -48,6 +48,18 @@ func (s *Server) resolveTaskRoleLLM(t *Task, agentKey string) (taskLLMResolution
 	if s == nil || s.m == nil || s.m.pg == nil {
 		return taskLLMResolution{}, fmt.Errorf("database unavailable")
 	}
+	if agentKey == "planner" {
+		id := t.lifecycleSnapshot().PlannerLLMProfileID
+		if id != 0 {
+			p, err := s.m.pg.ProfileByID(id)
+			if err != nil {
+				return taskLLMResolution{}, fmt.Errorf("load planner LLM profile: %w", err)
+			}
+			resolved := s.resolutionFromProfile(p, "planner_assignment")
+			resolved.ProfileID = &id
+			return resolved, nil
+		}
+	}
 	a, err := s.m.pg.GetAgentByKey(agentKey)
 	if err != nil {
 		return taskLLMResolution{}, fmt.Errorf("load agent %q: %w", agentKey, err)

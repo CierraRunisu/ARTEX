@@ -30,6 +30,7 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		ShareGlobalAssets   *bool    `json:"share_global_assets"`
 		WorkerCount         *int     `json:"worker_count"`
 		WorkerLLMProfileIDs *[]int64 `json:"worker_llm_profile_ids"`
+		PlannerLLMProfileID *int64   `json:"planner_llm_profile_id"`
 	}
 	if err := decode(r, &request); err != nil {
 		var tooLarge *http.MaxBytesError
@@ -40,13 +41,19 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if request.Name == nil && request.Pinned == nil && request.Remark == nil && request.ShareGlobalAssets == nil && request.WorkerCount == nil && request.WorkerLLMProfileIDs == nil {
-		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned、remark、share_global_assets 、worker_count 或 worker_llm_profile_ids")
+	if request.Name == nil && request.Pinned == nil && request.Remark == nil && request.ShareGlobalAssets == nil && request.WorkerCount == nil && request.WorkerLLMProfileIDs == nil && request.PlannerLLMProfileID == nil {
+		writeErr(w, http.StatusBadRequest, "至少需要提供 name、pinned、remark、share_global_assets 、worker_count 、worker_llm_profile_ids 或 planner_llm_profile_id")
 		return
 	}
 	if request.WorkerCount != nil && (*request.WorkerCount < 0 || *request.WorkerCount > db.MaxTaskWorkerCount) {
 		writeErr(w, http.StatusBadRequest, fmt.Sprintf("Worker 数量必须在 0 到 %d 之间", db.MaxTaskWorkerCount))
 		return
+	}
+	if request.PlannerLLMProfileID != nil {
+		if err := s.m.pg.ValidatePlannerLLMProfileID(*request.PlannerLLMProfileID); err != nil {
+			writeErr(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	if request.WorkerLLMProfileIDs != nil {
 		if err := s.m.pg.ValidateWorkerLLMProfileIDs(*request.WorkerLLMProfileIDs); err != nil {
@@ -79,7 +86,7 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	// exact configuration used to rebuild that task's worker pool.
 	s.concMu.Lock()
 	defer s.concMu.Unlock()
-	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark, ShareGlobalAssets: request.ShareGlobalAssets, WorkerCount: request.WorkerCount, WorkerLLMProfileIDs: request.WorkerLLMProfileIDs})
+	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned, Remark: request.Remark, ShareGlobalAssets: request.ShareGlobalAssets, WorkerCount: request.WorkerCount, WorkerLLMProfileIDs: request.WorkerLLMProfileIDs, PlannerLLMProfileID: request.PlannerLLMProfileID})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return

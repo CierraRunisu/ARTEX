@@ -71,6 +71,7 @@ type TaskDTO struct {
 	CoverageEnabled     bool               `json:"coverage_enabled"` // 资产覆盖度功能开关(创建时定)
 	ShareGlobalAssets   bool               `json:"share_global_assets"`
 	WorkerLLMProfileIDs []int64            `json:"worker_llm_profile_ids"`
+	PlannerLLMProfileID int64              `json:"planner_llm_profile_id"`
 	WorkerCount         int                `json:"worker_count"` // 本任务 Worker 数;0=用全局默认
 	WorkerActualCount   int                `json:"worker_actual_count"`
 	WorkerTargetCount   int                `json:"worker_target_count"`
@@ -175,6 +176,7 @@ func taskDTO(t *Task, status string) TaskDTO {
 		ShareGlobalAssets:   lifecycle.ShareGlobalAssets,
 		WorkerCount:         lifecycle.WorkerCount,
 		WorkerLLMProfileIDs: append([]int64{}, lifecycle.WorkerLLMProfileIDs...),
+		PlannerLLMProfileID: lifecycle.PlannerLLMProfileID,
 
 		NoResultSeconds:     t.NoResultSeconds,
 		NoResultMinFindings: t.NoResultMinFindings,

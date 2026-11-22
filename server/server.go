@@ -1736,6 +1736,7 @@ func truncateReply(s string) string {
 
 type createTaskReq struct {
 	WorkerLLMProfileIDs  []int64          `json:"worker_llm_profile_ids,omitempty"`
+	PlannerLLMProfileID  int64            `json:"planner_llm_profile_id,omitempty"`
 	Schedule             *scheduleRequest `json:"schedule,omitempty"`
 	Name                 string           `json:"name,omitempty"` // 可选任务名称;省略/空=未命名
 	CategoryID           *int64           `json:"category_id,omitempty"`
@@ -1837,6 +1838,9 @@ func (s *Server) createTaskFromRequest(req createTaskReq) (*Task, *taskCreateErr
 	if err != nil {
 		return nil, &taskCreateError{400, err.Error()}
 	}
+	if err := s.m.pg.ValidatePlannerLLMProfileID(req.PlannerLLMProfileID); err != nil {
+		return nil, &taskCreateError{400, err.Error()}
+	}
 	if len(req.WorkerLLMProfileIDs) > 0 {
 		if err := s.m.pg.ValidateWorkerLLMProfileIDs(req.WorkerLLMProfileIDs); err != nil {
 			return nil, &taskCreateError{400, err.Error()}
@@ -1859,6 +1863,7 @@ func (s *Server) createTaskFromRequest(req createTaskReq) (*Task, *taskCreateErr
 		Remark:              remark,
 		WorkerCount:         req.WorkerCount,
 		WorkerLLMProfileIDs: req.WorkerLLMProfileIDs,
+		PlannerLLMProfileID: req.PlannerLLMProfileID,
 		InterceptRules:      interceptRules,
 	})
 	if err != nil {

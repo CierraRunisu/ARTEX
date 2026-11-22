@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import { StatusBadge } from "@/components/status-badge";
+import { TaskPlannerModel } from "@/components/task-planner-model";
 import { TaskWorkerModels } from "@/components/task-worker-models";
 import { TaskLLMSettings } from "@/components/task-llm-settings";
 import { Button } from "@/components/ui/button";
@@ -492,6 +493,7 @@ export function OverviewTab({ taskId }: { taskId: string }) {
           {workerError && <p role="alert" className="text-sm text-destructive">{workerError}</p>}
         </CardContent>
       </Card>
+      <TaskPlannerModel task={task} onUpdated={(updated) => setTask(updated)} />
       <TaskWorkerModels task={task} onUpdated={(updated) => setTask(updated)} />
       <TaskLLMSettings task={task} onUpdated={(patch) => setTask((current) => current ? { ...current, ...patch } : current)} />
       {/* 原始任务描述与目标(创建时填写的),置顶便于随时回看。 */}

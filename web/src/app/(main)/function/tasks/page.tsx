@@ -1,4 +1,5 @@
 "use client";
+import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { WorkerModelPicker } from "@/components/worker-model-picker";
 
 import * as React from "react";
@@ -3605,6 +3606,7 @@ function CreateTaskSheet({
   const [seedFirstIntent, setSeedFirstIntent] = React.useState(false); // 创建时下发种子意图,worker 免等首轮 planner 直接开跑;默认关闭,走标准先规划再执行
   const [shareGlobalAssets, setShareGlobalAssets] = React.useState(false);
   const [coverageEnabled, setCoverageEnabled] = React.useState(true); // 资产覆盖度功能;默认开。关闭=不计算/展示覆盖度、不累积范围、隐藏范围类工具(company 关联不受影响)
+  const [plannerLLMProfileID, setPlannerLLMProfileID] = React.useState(0);
   const [workerLLMProfileIDs, setWorkerLLMProfileIDs] = React.useState<number[]>([]);
   const [globalWorkerCount, setGlobalWorkerCount] = React.useState(3);
   const [workerCount, setWorkerCount] = React.useState(""); // 本任务 Worker 数;空/0=用全局默认
@@ -3703,6 +3705,7 @@ function CreateTaskSheet({
         coverageEnabled,
         shareGlobalAssets,
         workerCount: workerCountNum,
+        plannerLLMProfileId: plannerLLMProfileID,
         workerLLMProfileIds: Array.from({ length: Math.max(workerModelCount, workerLLMProfileIDs.length) }, (_, i) => workerLLMProfileIDs[i] ?? 0),
         schedule: scheduleEnabled
           ? { ...schedule, name: schedule.name.trim() || translate("taskUI.defaultSchedule"), task_ids: [] }
@@ -3730,7 +3733,7 @@ function CreateTaskSheet({
       setCoverageEnabled(true);
       setShareGlobalAssets(false);
       setWorkerCount("");
-      setWorkerLLMProfileIDs([]);
+      setWorkerLLMProfileIDs([]); setPlannerLLMProfileID(0);
       setInterceptRules([]);
       setScheduleEnabled(false);
       setSchedule({
@@ -3792,7 +3795,7 @@ function CreateTaskSheet({
                 setCategoryID(template.category_id ?? undefined);
                 setInterceptRules(template.intercept_rules ?? []);
                 setWorkerCount(template.worker_count ? String(template.worker_count) : "");
-                setWorkerLLMProfileIDs([]);
+                setWorkerLLMProfileIDs([]); setPlannerLLMProfileID(0);
                 setUploadCount(0);
               }}
               portalContainer={sheetContentRef}
@@ -4151,6 +4154,12 @@ function CreateTaskSheet({
                   <p className="text-muted-foreground text-xs">{translate("taskUI.workerCountHelp")}</p>
                 </div>
                 <div className="grid gap-3">
+                  <Label htmlFor="new-task-planner-model">{translate("taskUI.plannerModelTitle")}</Label>
+                  <p className="text-muted-foreground text-xs">{translate("taskUI.plannerModelCreateHelp")}</p>
+                  <NativeSelect id="new-task-planner-model" value={String(plannerLLMProfileID)} disabled={creating} onChange={(event) => setPlannerLLMProfileID(Number(event.target.value))}>
+                    <NativeSelectOption value="0">{translate("taskUI.plannerModelDefault")}</NativeSelectOption>
+                    {profiles.map((profile) => <NativeSelectOption key={profile.id} value={String(profile.id)}>{profile.name} · {profile.model}</NativeSelectOption>)}
+                  </NativeSelect>
                   <Label>{translate("taskUI.workerModelsTitle")}</Label>
                   <p className="text-muted-foreground text-xs">{translate("taskUI.workerModelsCreateHelp")}</p>
                   <WorkerModelPicker profiles={profiles} count={workerModelCount} value={workerLLMProfileIDs}

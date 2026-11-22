@@ -76,6 +76,7 @@ type Task struct {
 	CoverageEnabled      bool                   `json:"coverage_enabled"`       // 资产覆盖度功能开关(创建时定,默认开)
 	ShareGlobalAssets    bool                   `json:"share_global_assets"`
 	WorkerLLMProfileIDs  []int64                `json:"worker_llm_profile_ids"`
+	PlannerLLMProfileID  int64                  `json:"planner_llm_profile_id"`
 	WorkerCount          int                    `json:"worker_count"` // 本任务 Worker 数;0=用全局默认
 	FirstRunAt           int64                  `json:"first_run_at,omitempty"`
 	DeadlineAt           int64                  `json:"deadline_at,omitempty"`
@@ -100,6 +101,7 @@ type Task struct {
 // directly after the task has been published by Manager.
 type taskLifecycleState struct {
 	WorkerLLMProfileIDs []int64
+	PlannerLLMProfileID int64
 	WorkerCount         int
 	ShareGlobalAssets   bool
 	Name                string
@@ -145,6 +147,7 @@ func (t *Task) lifecycleSnapshotLocked() taskLifecycleState {
 		ShareGlobalAssets:   t.ShareGlobalAssets,
 		WorkerCount:         t.WorkerCount,
 		WorkerLLMProfileIDs: append([]int64(nil), t.WorkerLLMProfileIDs...),
+		PlannerLLMProfileID: t.PlannerLLMProfileID,
 		Name:                t.Name,
 		Remark:              t.Remark,
 		PinnedAt:            t.PinnedAt,
@@ -178,6 +181,7 @@ func (t *Task) updateLifecycle(update func(*taskLifecycleState)) {
 	t.ShareGlobalAssets = state.ShareGlobalAssets
 	t.WorkerCount = state.WorkerCount
 	t.WorkerLLMProfileIDs = append([]int64(nil), state.WorkerLLMProfileIDs...)
+	t.PlannerLLMProfileID = state.PlannerLLMProfileID
 	t.Name = state.Name
 	t.Remark = state.Remark
 	t.PinnedAt = state.PinnedAt
@@ -1212,7 +1216,7 @@ func taskFromPG(pt *pgdb.Task, store *pgdb.ExplorationStore, ic *intercept.Inter
 		NoResultSeconds: pt.NoResultSeconds, NoResultMinFindings: pt.NoResultMinFindings, NoResultMinSeverity: pt.NoResultMinSeverity,
 		NoResultBaseSeconds: pt.NoResultBaseSeconds, NoResultCheckedAt: unixOrZero(pt.NoResultCheckedAt), StopReason: pt.StopReason,
 		TimeoutSeconds: pt.TimeoutSeconds, PlanHeartbeatSeconds: pt.PlanHeartbeatSeconds,
-		CoverageEnabled: pt.CoverageEnabled, ShareGlobalAssets: pt.ShareGlobalAssets, WorkerCount: pt.WorkerCount, WorkerLLMProfileIDs: append([]int64(nil), pt.WorkerLLMProfileIDs...),
+		CoverageEnabled: pt.CoverageEnabled, ShareGlobalAssets: pt.ShareGlobalAssets, WorkerCount: pt.WorkerCount, PlannerLLMProfileID: pt.PlannerLLMProfileID, WorkerLLMProfileIDs: append([]int64(nil), pt.WorkerLLMProfileIDs...),
 		FirstRunAt: unixOrZero(pt.FirstRunAt), DeadlineAt: unixOrZero(pt.DeadlineAt),
 		ActiveRunSeconds: pt.ActiveRunSeconds, RunSegmentStartedAt: unixOrZero(pt.RunSegmentStartedAt),
 		Store: store, Guard: guard.NewWithInterceptor(ic), notify: make(chan struct{}, 1),
@@ -1241,6 +1245,7 @@ func (m *Manager) UpdateTaskMetadata(taskID string, patch pgdb.TaskPatch) (*Task
 	task.updateLifecycle(func(state *taskLifecycleState) {
 		state.ShareGlobalAssets = updated.ShareGlobalAssets
 		state.WorkerCount = updated.WorkerCount
+		state.PlannerLLMProfileID = updated.PlannerLLMProfileID
 		state.WorkerLLMProfileIDs = append([]int64(nil), updated.WorkerLLMProfileIDs...)
 		state.Name = updated.Name
 		state.Remark = updated.Remark

@@ -1701,3 +1701,6 @@ CREATE TABLE IF NOT EXISTS mcp_audit_log (
     duration_ms BIGINT NOT NULL DEFAULT 0,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- A task Planner override is independent from the task failover chain. Zero inherits.
+ALTER TABLE tasks ADD COLUMN IF NOT EXISTS planner_llm_profile_id BIGINT NOT NULL DEFAULT 0;

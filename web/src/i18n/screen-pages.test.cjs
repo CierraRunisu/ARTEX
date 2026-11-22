@@ -417,3 +417,23 @@ test("Repeater renders persisted drafts with translated default group and preser
   assert.equal(useRepeaterStore.getState().workspace.tabs[0].rawRequest, "GET / HTTP/1.1\nHost: example.test\n\n");
   useRepeaterStore.setState({ workspace: null });
 });
+
+
+test("task Planner model assignment has an accessible selector and explicit inheritance in both languages", async () => {
+  const { TaskPlannerModel } = load(base + "/src/components/task-planner-model.tsx");
+  for (const language of ["en", "zh-CN"]) {
+    await i18n.changeLanguage(language);
+    const html = render(TaskPlannerModel, { task: { id: "planner-test", planner_llm_profile_id: 0 }, onUpdated: noop });
+    assert.match(html, /for="planner-model-planner-test"/);
+    assert.match(html, /id="planner-model-planner-test"/);
+    const text = visible(html);
+    if (language === "en") {
+      assert.match(text, /Save Planner model/);
+      assert.match(text, /Use existing Planner model rules/);
+      assert.match(text, /next planning call/);
+    } else {
+      assert.match(text, /保存 Planner 模型/);
+      assert.match(text, /沿用原有 Planner 模型规则/);
+    }
+  }
+});

@@ -1,4 +1,12 @@
 export const taskMessages = {
+  "taskUI.plannerModelTitle": ["本任务 Planner · 模型分配", "Task Planner · Model assignment"],
+  "taskUI.plannerModelHelp": ["指定此任务规划 Agent 使用的 LLM 配置，优先于原有 Planner 路由。保存后从下一次规划调用生效，已发出的调用保持原配置，不会自动启动或恢复任务。", "Select the LLM profile for this task’s Planner, overriding existing Planner routing. Applies to the next planning call; in-flight calls keep their model. Saving does not start or resume the task."],
+  "taskUI.plannerModelCreateHelp": ["指定本任务 Planner 使用的模型，创建后首次规划即生效；未指定时沿用现有 Planner 模型规则。", "Choose this task’s Planner model before its first planning call. Leave unassigned to keep existing Planner routing."],
+  "taskUI.plannerModelDefault": ["沿用原有 Planner 模型规则", "Use existing Planner model rules"],
+  "taskUI.plannerModelSave": ["保存 Planner 模型", "Save Planner model"],
+  "taskUI.plannerModelReset": ["清空，沿用原规则", "Clear, use existing rules"],
+  "taskUI.plannerModelSaved": ["已保存，下次规划调用生效。", "Saved. Applies to the next planning call."],
+  "taskUI.plannerModelLoadFailed": ["加载 Planner 模型配置失败", "Could not load Planner model settings"],
   "taskUI.workerModelsDraining": ["模型切换中：当前意图完成后应用已保存配置", "Model change pending: saved settings apply after running intents finish"],
   "taskWorkers.edit": ["调整 Worker 并发", "Adjust Worker concurrency"],
   "taskWorkers.label": ["Worker 数量（0–50）", "Worker count (0–50)"],

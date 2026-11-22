@@ -136,6 +136,14 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 	r.s.syncTaskLLMState(pt)
 	t, _ := r.s.m.Task(r.taskID)
 	sel := taskLLMSelection{task: t, revision: pt.LLMChainRevision}
+	if r.agentKey == "planner" && pt.PlannerLLMProfileID != 0 {
+		prov, cfg, ok := r.s.providerForProfile(pt.PlannerLLMProfileID)
+		if !ok {
+			return sel, fmt.Errorf("Planner LLM profile #%d is missing or invalid", pt.PlannerLLMProfileID)
+		}
+		sel.provider, sel.retry = prov, cfg.Retry
+		return sel, nil // explicit Planner never advances the task failover chain
+	}
 	if prov, cfg, ok := r.bindingProvider(); ok {
 		sel.provider, sel.retry = prov, cfg.Retry
 		return sel, nil
@@ -177,6 +185,10 @@ func (r *taskLLMRuntime) activeCfg() (agent.Config, bool) {
 	pt, err := r.s.m.pg.GetTask(taskNum)
 	if err != nil || pt == nil {
 		return agent.Config{}, false
+	}
+	if r.agentKey == "planner" && pt.PlannerLLMProfileID != 0 {
+		_, cfg, ok := r.s.providerForProfile(pt.PlannerLLMProfileID)
+		return cfg, ok
 	}
 	if _, cfg, ok := r.bindingProvider(); ok {
 		return cfg, true
@@ -472,6 +484,12 @@ func isRetryableStreamError(err error) bool {
 // CompactionWindow mirrors current()'s precedence so the context window always
 // matches the provider the role will actually stream on.
 func (r *taskLLMRuntime) CompactionWindow() int {
+	if r.agentKey == "planner" {
+		if t, ok := r.s.m.Task(r.taskID); ok && t.lifecycleSnapshot().PlannerLLMProfileID != 0 {
+			cfg, _ := r.activeCfg()
+			return cfg.CompactionWindow()
+		}
+	}
 	if r.pinProfileID != nil {
 		if _, cfg, ok := r.s.providerForProfile(*r.pinProfileID); ok {
 			return cfg.CompactionWindow()

@@ -25,6 +25,7 @@ export interface Task {
   distinct_findings?: FindingDistinctStats;
   id: string;
   remark?: string;
+  planner_llm_profile_id?: number; // 0 = existing Planner routing
   worker_llm_profile_ids?: number[]; // Worker ordinal -> LLM profile; 0 = task default
   worker_count?: number; // 本任务 Worker 数;0/缺省=用全局默认
   worker_actual_count?: number; // 当前存活的 Worker pool loops，含缩容退出中的 loops
