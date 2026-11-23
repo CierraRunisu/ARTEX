@@ -64,7 +64,11 @@ func TestBackupExportRestoreRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Skipf("postgres unavailable (%v)", err)
 	}
-	task, err := source.pg.CreateTask("backup source", "migrate me", nil, 0, 0)
+	profileID, err := source.pg.SaveProfile(&pgdb.LLMProfile{Name: "backup models", Format: "openai", Model: "local-only", BaseURL: "http://127.0.0.1:1/v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, err := source.pg.CreateTaskWithOptions("backup source", "migrate me", pgdb.TaskCreateOptions{WorkerCount: 2, WorkerLLMProfileIDs: []int64{0, profileID}, PlannerLLMProfileID: profileID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,7 +183,7 @@ func TestBackupExportRestoreRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restored.Close()
-	if got, err := restored.GetTask(task.ID); err != nil || got == nil || got.Goal != "migrate me" {
+	if got, err := restored.GetTask(task.ID); err != nil || got == nil || got.Goal != "migrate me" || got.WorkerCount != 2 || got.PlannerLLMProfileID != profileID || len(got.WorkerLLMProfileIDs) != 2 || got.WorkerLLMProfileIDs[0] != 0 || got.WorkerLLMProfileIDs[1] != profileID {
 		t.Fatalf("restored task=%+v err=%v", got, err)
 	}
 	if value, ok, _ := restored.GetSetting("backup.marker"); !ok || value != "from-source" {

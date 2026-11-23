@@ -153,7 +153,7 @@ func TestTaskArchiveDatabaseRoundTrip(t *testing.T) {
 	}
 	exhaustedAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	chainCreatedAt := exhaustedAt.Add(-time.Hour)
-	if _, err := d.Exec(`UPDATE tasks SET company_id=$2,llm_profile_id=$3,active_llm_profile_id=$3 WHERE id=$1`, task.ID, companyID, llmProfileID); err != nil {
+	if _, err := d.Exec(`UPDATE tasks SET company_id=$2,llm_profile_id=$3,active_llm_profile_id=$3,worker_llm_profile_ids=jsonb_build_array(0,$3::bigint+1000000),planner_llm_profile_id=$3+1000000 WHERE id=$1`, task.ID, companyID, llmProfileID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.Exec(`INSERT INTO task_llm_profiles(task_id,profile_id,position,status,last_error,exhausted_at,created_at,updated_at)
@@ -241,6 +241,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if live, err := d.GetTask(task.ID); err != nil || live != nil {
 		t.Fatalf("archived task must be hidden, got %+v, %v", live, err)
 	}
+	if _, err := d.Exec(`UPDATE tasks SET worker_llm_profile_ids='[]'::jsonb,planner_llm_profile_id=0 WHERE id=$1`, task.ID); err != nil {
+		t.Fatal(err)
+	}
 	var nodes, assets, usage int
 	if err := d.QueryRow(`SELECT count(*) FROM exploration_nodes WHERE exploration_id=$1`, task.ExplorationID).Scan(&nodes); err != nil {
 		t.Fatal(err)
@@ -286,6 +289,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	if err != nil || restoredIntel.Content != "archive-fixture" || restoredIntel.Credentials == nil || len(restoredIntel.Credentials.Accounts) != 1 || len(restoredIntel.Credentials.Traffic) != 1 {
 		t.Fatalf("intelligence lost after archive: %+v %v", restoredIntel, err)
 	}
+	if !strings.Contains(strings.Join(warnings, "\n"), "Planner LLM") || !strings.Contains(strings.Join(warnings, "\n"), "work#2 LLM") {
+		t.Fatalf("missing assignment warnings: %v", warnings)
+	}
 	warningFound := false
 	for _, warning := range warnings {
 		if strings.Contains(warning, fmt.Sprintf("任务企业 %d 已删除", companyID)) {
@@ -298,6 +304,9 @@ VALUES($1,$2,0,'quota_exhausted','balance exhausted',$3,$4,$3)`, task.ID, llmPro
 	live, err := d.GetTask(task.ID)
 	if err != nil || live == nil {
 		t.Fatalf("restored task = %+v, %v", live, err)
+	}
+	if live.PlannerLLMProfileID != llmProfileID+1000000 || len(live.WorkerLLMProfileIDs) != 2 || live.WorkerLLMProfileIDs[0] != 0 || live.WorkerLLMProfileIDs[1] != llmProfileID+1000000 {
+		t.Fatalf("archive lost assigned models: %+v", live)
 	}
 	if live.Name != "cold task" || live.Remark != remark || live.WorkerCount != 7 || !live.ShareGlobalAssets || !live.Paused {
 		t.Fatalf("restored task metadata mismatch: %+v", live)

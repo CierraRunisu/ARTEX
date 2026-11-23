@@ -36,8 +36,8 @@ func TestPausedTaskResumeReloadsGlobalWorkersAndTaskOverride(t *testing.T) {
 	if err := m.SetWorkers(1); err != nil {
 		t.Fatal(err)
 	}
-	e.Run(ctx, task) // editing a running task must not resize it immediately
-	count(2)
+	e.Run(ctx, task) // upstream Run reconciles the existing unified pool immediately
+	count(1)
 	e.Pause(task.ID, agent.AbortPausedByUser)
 	e.Run(ctx, task)
 	e.Resume(task)

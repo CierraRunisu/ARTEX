@@ -70,7 +70,7 @@ func TestTaskPlannerModelPersistenceAndLiveRouting(t *testing.T) {
 	if err := m.pg.SetAgentLLMProfile("planner", &ids[1]); err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{m: m, provByProfile: map[int64]*provEntry{}}
+	s := &Server{m: m, engine: NewEngine(m), provByProfile: map[int64]*provEntry{}}
 	providers := make([]*scriptedLLMProvider, 3)
 	for i, id := range ids {
 		providers[i] = &scriptedLLMProvider{}

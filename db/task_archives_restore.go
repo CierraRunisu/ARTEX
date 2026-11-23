@@ -227,6 +227,18 @@ WHERE archive.id=$1 FOR UPDATE OF archive,task`, archiveID).Scan(&taskID, &expID
 			warnings = append(warnings, fmt.Sprintf("LLM 配置 %d 已删除，已从任务配置中移除", profileID))
 		}
 	}
+	// Explicit assignments are routing intent, not optional foreign keys. Keep
+	// missing ids so resolution stays unavailable instead of inheriting a model.
+	if id, _ := jsonInt64(taskRow["planner_llm_profile_id"]); id > 0 && !rowExists(tx, "llm_profiles", id) {
+		warnings = append(warnings, fmt.Sprintf("Planner LLM 配置 %d 已删除，已保留指定配置，恢复配置前不可用", id))
+	}
+	if slots, ok := taskRow["worker_llm_profile_ids"].([]any); ok {
+		for index, raw := range slots {
+			if id, _ := jsonInt64(raw); id > 0 && !rowExists(tx, "llm_profiles", id) {
+				warnings = append(warnings, fmt.Sprintf("work#%d LLM 配置 %d 已删除，已保留指定配置，恢复配置前不可用", index+1, id))
+			}
+		}
+	}
 	if err := restoreExplorationStub(tx, snapshot.Tables["explorations"], expID); err != nil {
 		return nil, err
 	}
@@ -321,6 +333,7 @@ func restoreTaskStub(tx *sql.Tx, row map[string]any, taskID, remaining int64) er
  name=archived.name,remark=COALESCE(archived.remark,''),category_id=archived.category_id,description=archived.description,goal=archived.goal,
  status=archived.status,paused=archived.paused,queued=false,queued_at=NULL,queue_mode='',
  llm_profile_id=archived.llm_profile_id,active_llm_profile_id=archived.active_llm_profile_id,
+ worker_llm_profile_ids=COALESCE(archived.worker_llm_profile_ids,'[]'::jsonb),planner_llm_profile_id=COALESCE(archived.planner_llm_profile_id,0),
  llm_chain_revision=archived.llm_chain_revision,company_id=archived.company_id,parent_ref=archived.parent_ref,
  timeout_seconds=archived.timeout_seconds,plan_heartbeat_seconds=archived.plan_heartbeat_seconds,
  no_result_seconds=COALESCE(archived.no_result_seconds,0),

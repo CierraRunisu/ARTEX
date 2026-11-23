@@ -726,7 +726,7 @@ export interface TaskLLMResolution {
   name: string;
   format: string;
   model: string;
-  source: "task_chain" | "agent_binding" | "global_profile" | "environment" | "global" | "worker_assignment";
+  source: "task_chain" | "agent_binding" | "global_profile" | "environment" | "global" | "worker_assignment" | "planner_assignment";
   available: boolean;
   reason?: string;
 }
